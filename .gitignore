@@ -1,0 +1,33 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large data files (optional - uncomment if you don't want to track the large dataset)
+TRDataChallenge2023.txt
+TRDataChallenge2023.zip
+
+# Processed data (optional - uncomment if you don't want to track processed outputs)
+processed_data/
+
+# unwant files
+simple_tr_reader.py
+read_tr_data.py
