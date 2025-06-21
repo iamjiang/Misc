@@ -8,3 +8,7 @@ rich>=10.0.0
 transformers
 datasets
 jinja2
+lightgbm>=3.3.5
+xgboost>=1.7.1
+nltk>=3.7.0
+scipy>=1.9.3
