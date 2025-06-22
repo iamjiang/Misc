@@ -523,6 +523,8 @@ if __name__=="__main__":
     
     args= parser.parse_args()
 
+    seed_everything(args.seed)
+
     ### Load Dataset for model training and evaluation ###
     data_path=os.path.join(os.path.dirname(__file__), args.data_path)
     with open(os.path.join(data_path,'train_arrays.pkl'), 'rb') as f:
