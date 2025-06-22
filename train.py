@@ -290,14 +290,15 @@ class LoggingCallback(TrainerCallback):
 
         # Extract metrics
         epoch = round(float(state.epoch), 2) if state.epoch is not None else None
-        train_loss = logs.get("loss")
-        if train_loss is not None:
-            train_loss = round(float(train_loss), 4)
-            self.last_train_loss = train_loss
-        elif self.last_train_loss is not None:
-            train_loss = self.last_train_loss
-        else:
-            train_loss = "N/A"  # or skip logging this time
+        step=int(state.global_step)
+        # train_loss = logs.get("loss")
+        # if train_loss is not None:
+        #     train_loss = round(float(train_loss), 4)
+        #     self.last_train_loss = train_loss
+        # elif self.last_train_loss is not None:
+        #     train_loss = self.last_train_loss
+        # else:
+        #     train_loss = "N/A"  # or skip logging this time
         eval_loss = logs.get("eval_loss")
         eval_accuracy = logs.get("eval_accuracy")
         eval_hamming_loss = logs.get("eval_hamming_loss")
@@ -313,7 +314,7 @@ class LoggingCallback(TrainerCallback):
         # Prepare log line: epoch, train_loss, eval_loss, eval_accuracy, eval_hamming_loss, eval_jaccard_weighted
         log_line = (
             f"Epoch: {epoch} | "
-            f"Train Loss: {train_loss} | "
+            f"Step: {step} | "
             f"Val Loss: {eval_loss} | "
             f"Val Acc: {eval_accuracy} | "
             f"Val Hamming Loss: {eval_hamming_loss} | "
@@ -467,6 +468,34 @@ def main(args):
     print("\n🎯 Starting training...")
     trainer.train()
     print("✅ Training completed successfully!")
+
+    val_results = trainer.evaluate()
+
+    # Display key metrics
+    key_metrics = [
+        'eval_f1_micro', 'eval_f1_macro', 'eval_accuracy', 'eval_hamming_loss',
+        'eval_precision_micro','eval_precision_macro', 'eval_recall_micro', 'eval_recall_macro', 
+        'eval_roc_auc_macro', 'eval_roc_auc_micro','eval_pr_auc_macro', 'eval_pr_auc_micro',
+        'eval_jaccard_macro', 'eval_jaccard_weighted'
+    ]
+
+    with open(os.path.join(args.output_dir,"val_logs.txt"), "w") as f:
+        for metric in key_metrics:
+            if metric in val_results:
+                line = f"{metric}: {val_results[metric]:.4f}"
+                print(f"   {line}")
+                f.write(line + "\n")
+
+    if "test" in tokenized_dataset:
+        print("\n🎯 Test Set Evaluation:")
+        test_results = trainer.evaluate(eval_dataset=tokenized_dataset["test"])
+        with open(os.path.join(args.output_dir,"test_logs.txt"), "w") as f:
+            for metric in key_metrics:
+                if metric in test_results:
+                    line = f"{metric}: {test_results[metric]:.4f}"
+                    print(f"   {line}")
+                    f.write(line + "\n")
+
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description='Fine-tune MordenBERT')
