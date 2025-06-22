@@ -1,4 +1,5 @@
 import os
+import gc
 import pandas as pd
 import numpy as np
 import pickle
@@ -9,6 +10,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import TrainingArguments, Trainer
 from transformers import DataCollatorWithPadding
 from transformers import EarlyStoppingCallback
+from transformers import TrainerCallback
 import evaluate
 import argparse
 from functools import partial
@@ -248,6 +250,79 @@ def compute_metrics(eval_pred):
         'eval_jaccard_macro': metrics['jaccard_macro'],
         'eval_jaccard_weighted': metrics['jaccard_weighted'],
     }
+
+class ClearCUDACacheCallback(TrainerCallback):
+    def on_step_end(self,args,state,control,**kwargs):
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+    def on_evaluate(self,args,state,control,**kwargs):
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+    
+class EarlyStoppingCallback(TrainerCallback):
+    def __init__(self,patience=1):
+        super().__init__()
+        self.patience=patience
+        self.best_loss = float("inf")
+        self.early_stop_count = 0
+
+    def on_evaluate(self, args, state, control, **kwargs):
+        # Access the evaluation loss
+        eval_loss = kwargs["metrics"]["eval_loss"]
+        if eval_loss < self.best_loss:
+            self.best_loss = eval_loss
+            self.early_stop_count = 0
+        else:
+            self.early_stop_count += 1
+        if self.early_stop_count >= self.patience:
+            print("Early stopping triggered")
+            control.should_training_stop = True
+            
+class LoggingCallback(TrainerCallback):
+    def __init__(self,log_file):
+        super().__init__()
+        self.log_file=log_file
+        self.last_train_loss = None
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        logs = logs or {}
+
+        # Extract metrics
+        epoch = round(float(state.epoch), 2) if state.epoch is not None else None
+        train_loss = logs.get("loss")
+        if train_loss is not None:
+            train_loss = round(float(train_loss), 4)
+            self.last_train_loss = train_loss
+        elif self.last_train_loss is not None:
+            train_loss = self.last_train_loss
+        else:
+            train_loss = "N/A"  # or skip logging this time
+        eval_loss = logs.get("eval_loss")
+        eval_accuracy = logs.get("eval_accuracy")
+        eval_hamming_loss = logs.get("eval_hamming_loss")
+        eval_jaccard_weighted = logs.get("eval_jaccard_weighted")
+
+        # Round losses to 4 decimal places if present
+        # train_loss = round(float(train_loss), 4) if train_loss is not None else None
+        eval_loss = round(float(eval_loss), 4) if eval_loss is not None else None
+        eval_accuracy = round(float(eval_accuracy), 4) if eval_accuracy is not None else None
+        eval_hamming_loss = round(float(eval_hamming_loss), 4) if eval_hamming_loss is not None else None
+        eval_jaccard_weighted = round(float(eval_jaccard_weighted), 4) if eval_jaccard_weighted is not None else None
+
+        # Prepare log line: epoch, train_loss, eval_loss, eval_accuracy, eval_hamming_loss, eval_jaccard_weighted
+        log_line = (
+            f"Epoch: {epoch} | "
+            f"Train Loss: {train_loss} | "
+            f"Val Loss: {eval_loss} | "
+            f"Val Acc: {eval_accuracy} | "
+            f"Val Hamming Loss: {eval_hamming_loss} | "
+            f"Val Jaccard Weighted: {eval_jaccard_weighted}\n"
+        )
+
+        # Write to log file
+        with open(self.log_file, "a") as f:
+            f.write(log_line)
     
 def main(args):
     dataset = create_datasets_from_arrays(X_train, y_train, X_val, y_val, X_test, y_test)
@@ -318,10 +393,10 @@ def main(args):
 
     training_args = TrainingArguments(
         # Output and logging
-        output_dir="./model_output",
-        logging_dir="./logs",
-        logging_steps=50,
-        logging_strategy="steps",
+        output_dir=args.output_dir,
+        # logging_dir="./logs",
+        # logging_steps=100,
+        logging_strategy="no", ## we customize logging intead of using the built-in logging
         
         # Learning parameters
         learning_rate=2e-5,
@@ -369,11 +444,11 @@ def main(args):
         report_to=None,  # Disable wandb/tensorboard if not needed
         run_name="multi_label_posture_classification",
     )
-    # Early stopping callback for overfitting control
-    early_stopping = EarlyStoppingCallback(
-        early_stopping_patience=3,  # Stop if no improvement for 3 evaluations
-        early_stopping_threshold=0.001  # Minimum improvement threshold
-    )
+    # # Early stopping callback for overfitting control
+    # early_stopping = EarlyStoppingCallback(
+    #     early_stopping_patience=3,  # Stop if no improvement for 3 evaluations
+    #     early_stopping_threshold=0.001  # Minimum improvement threshold
+    # )
     
     # Initialize trainer with enhanced configuration (using processing_class)
     trainer = Trainer(
@@ -384,32 +459,28 @@ def main(args):
         processing_class=tokenizer,  # Updated parameter name
         data_collator=data_collator,
         compute_metrics=compute_metrics,
-        callbacks=[early_stopping],  # Add early stopping callback
+        callbacks=[EarlyStoppingCallback(patience=3),
+                   ClearCUDACacheCallback(),
+                   LoggingCallback(log_file=os.path.join(args.output_dir,"training_logs.txt"))],  # Add early stopping callback
     )    
-    # Start training with error handling
-    try:
-        print("\n🎯 Starting training...")
-        trainer.train()
-        print("✅ Training completed successfully!")
-    except Exception as e:
-        print(f"❌ Training failed with error: {e}")
-        print("💡 Consider:")
-        print("   - Reducing batch size if out of memory")
-        print("   - Checking data format compatibility")
-        print("   - Verifying model and tokenizer compatibility")
-        print("   - The data format may need fixing - check tokenization step")
-        
+
+    print("\n🎯 Starting training...")
+    trainer.train()
+    print("✅ Training completed successfully!")
+
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description='Fine-tune MordenBERT')
 
     parser.add_argument("--seed",  type=int,default=42)
     parser.add_argument("--data_path", type=str, default='processed_data')
+    parser.add_argument("--output_dir", type=str, default='model_output')
     parser.add_argument('--model_path', type=str, default="answerdotai/ModernBERT-base")
     parser.add_argument('--train_batch', type=int, default=4)
     parser.add_argument('--eval_batch', type=int, default=8)
     parser.add_argument('--gradient_accumulation_step', type=int, default=12)
     parser.add_argument('--num_epochs', type=int, default=5)
     parser.add_argument('--max_context_length', type=int, default=8192)
+    
     args= parser.parse_args()
 
     ### Load Dataset for model training and evaluation ###
