@@ -11,6 +11,7 @@ from transformers import TrainingArguments, Trainer
 from transformers import DataCollatorWithPadding
 from transformers import EarlyStoppingCallback
 from transformers import TrainerCallback
+from transformers import set_seed
 import evaluate
 import argparse
 from functools import partial
@@ -22,6 +23,16 @@ from sklearn.metrics import (
 
 import warnings
 warnings.filterwarnings('ignore')
+
+def seed_everything(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.random.manual_seed(seed)
+    np.random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    set_seed(seed)
 
 def create_datasets_from_arrays(X_train, y_train, X_val=None, y_val=None, X_test=None, y_test=None):
     """
